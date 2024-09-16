@@ -70,14 +70,27 @@ def get_post_thread(post_url):
     else:
         raise Exception(f"Failed to retrieve post thread. Status code: {response.status_code}, Message: {response.text}")
 
+def check_ffmpeg():
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            print("ffmpeg is not installed.")
+            sys.exit(1)
+    except FileNotFoundError:
+        print("ffmpeg is not installed.")
+        sys.exit(1)
+
 def download_video(post_data, path):
     playlist_url = post_data.get('thread', {}).get('post', {}).get('embed', {}).get('playlist', '')
     if not playlist_url:
         print(f"Post does not have a video embed.")
-        exit()
-    subprocess.run([
-        'ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path
-    ])
+        sys.exit(1)
+    check_ffmpeg()
+    result = subprocess.run(
+        ['ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path],
+        stderr=subprocess.PIPE, text=True)
+    if result.returncode == 0:
+        print(f"Video successfully downloaded to {path}")
 
 def main():
     try:
@@ -85,7 +98,7 @@ def main():
         post_data, rkey = get_post_thread(post_url)
         if json_print_mode:
             print(post_data)
-            exit()
+            sys.exit(1)
         if input_filename != "":
             path = f"{directory}/{input_filename}.mp4"
         else:
