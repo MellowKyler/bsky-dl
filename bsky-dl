@@ -17,10 +17,13 @@ def input_validation():
     else:
         input_url = sys.argv[1]
     if len(sys.argv) < 3:
-        input_dir = defaults["default_dir"]
-        if input_dir == '':
-            input_dir = str(Path.home()) + "/Downloads"
-            print(f"No default directory specified. Attempting {input_dir}...")
+        input_dir = Path.cwd()
+        if defaults["default_dir"] == '':
+            input_dir = Path.cwd()
+            print(f"No default directory specified. Saving to {input_dir}...")
+        else:
+            input_dir = defaults["default_dir"]
+            print(f"No directory specified. Saving to {input_dir}...")
     else:
         input_dir = sys.argv[2]
     input_path = Path(input_dir)
