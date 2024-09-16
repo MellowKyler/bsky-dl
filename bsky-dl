@@ -60,11 +60,11 @@ def resolve_did(handle):
         raise Exception(f"Failed to resolve DID. Status code: {response.status_code}, Message: {response.text}")
 
 def get_post_thread(post_url):
-    BASE_URL = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread'
-    HEADERS = {'Content-Type': 'application/json'}
+    api_url = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread'
+    headers = {'Content-Type': 'application/json'}
     at_uri, rkey = url2uri(post_url)
     params = {'uri': at_uri, 'depth': 0}
-    response = requests.get(BASE_URL, headers=HEADERS, params=params)
+    response = requests.get(api_url, headers=headers, params=params)
     if response.status_code == 200:
         return response.json(), rkey
     else:
@@ -87,8 +87,7 @@ def download_video(post_data, path):
         sys.exit(1)
     check_ffmpeg()
     result = subprocess.run(
-        ['ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path],
-        stderr=subprocess.PIPE, text=True)
+        ['ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path])
     if result.returncode == 0:
         print(f"Video successfully downloaded to {path}")
 
