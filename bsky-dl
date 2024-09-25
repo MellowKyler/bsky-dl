@@ -3,111 +3,92 @@
 import requests
 import subprocess
 import sys
+import json
 from pathlib import Path
 
 defaults = {
+    #input_dir >> default_dir >> cwd
     "default_dir": ''
 }
 
-def input_validation():
-    input_filename = ""
-    if len(sys.argv) < 2:
-        print("No url entered.")
-        sys.exit(1)
-    else:
-        input_url = sys.argv[1]
-    if len(sys.argv) < 3:
-        input_dir = Path.cwd()
-        if defaults["default_dir"] == '':
-            input_dir = Path.cwd()
-            print(f"No default directory specified. Saving to {input_dir}...")
-        else:
-            input_dir = defaults["default_dir"]
-            print(f"No directory specified. Saving to {input_dir}...")
-    else:
-        input_dir = sys.argv[2]
-    input_path = Path(input_dir)
-    if not input_path.is_dir():
-        if input_path.parent.is_dir():
-            input_dir = str(input_path.parent)
-            input_filename = input_path.stem
-        else:
-            print(f"{input_dir} is not a valid directory")
-            sys.exit(1)
-    if len(sys.argv) > 3:
-        json_print_mode = 1
-    else:
-        json_print_mode = 0
-    return input_url, input_dir, json_print_mode, input_filename
+# TODO: images, # of quotes in chain, subtitles
+
+def help_text():
+    print("""
+bsky-dl [url] [location] [options]
+
+Download videos and extract json from Bluesky posts.
+
+OPTIONS:
+    --m3u8: download m3u8 video rather than blob
+    --json: print the getPostThread JSON to file
+    --replies: include replies and parents in JSON
+
+The file download location uses the following hierarchy:
+    1. Location specified in command
+    2. default_dir specified in script
+    3. Current working directory
+    """)
+    sys.exit()
+
+def input_validation(filename):
+    if "--help" in sys.argv: help_text()
+    m3u8_mode = 0 if "--m3u8" not in sys.argv else (sys.argv.remove("--m3u8") or 1)
+    json_mode = 0 if "--json" not in sys.argv else (sys.argv.remove("--json") or 1)
+    reply_mode = 0 if "--replies" not in sys.argv else (sys.argv.remove("--replies") or 1)
+    url = sys.argv[1] if len(sys.argv) >= 2 else (print("No url entered.") or sys.exit(1))
+    directory = sys.argv[2] if len(sys.argv) >= 3 else (Path.cwd() if defaults["default_dir"] == '' else defaults["default_dir"])
+    if not Path(directory).is_dir():
+        if Path(directory).parent.is_dir(): print(f"{directory} is not a valid directory") or sys.exit(1)
+        directory = str(input_path.parent)
+        filename = input_path.stem
+    return url, directory, filename, json_mode, m3u8_mode, reply_mode
 
 def url2uri(post_url):
     parts = post_url.rstrip('/').split('/')
-    if len(parts) < 4:
-        print("POST URL: " + post_url)
-        raise ValueError("URL does not have enough segments.")
-    username = parts[-3]
-    authority = resolve_did(username)
+    if len(parts) < 4: raise ValueError(f"Post URL '{post_url}' does not have enough segments.")
     rkey = parts[-1]
-    collection = 'app.bsky.feed.post'
-    at_uri = f"at://{authority}/{collection}/{rkey}"
-    return at_uri, rkey
+    username = parts[-3]
+    return f"at://{resolve_did(username)}/app.bsky.feed.post/{rkey}", rkey
 
 def resolve_did(handle):
-    resolve_url = 'https://bsky.social/xrpc/com.atproto.identity.resolveHandle'
-    params = {'handle': handle}
-    response = requests.get(resolve_url, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        return data['did']
-    else:
-        raise Exception(f"Failed to resolve DID. Status code: {response.status_code}, Message: {response.text}")
+    response = requests.get(f'https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle={handle}')
+    if response.status_code != 200: raise Exception(f"Failed to resolve DID: '{response.text}'")
+    return response.json()['did']
 
-def get_post_thread(post_url):
-    api_url = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread'
-    headers = {'Content-Type': 'application/json'}
+def get_post_thread(post_url, reply_mode):
     at_uri, rkey = url2uri(post_url)
-    params = {'uri': at_uri, 'depth': 0}
-    response = requests.get(api_url, headers=headers, params=params)
-    if response.status_code == 200:
-        return response.json(), rkey
-    else:
-        raise Exception(f"Failed to retrieve post thread. Status code: {response.status_code}, Message: {response.text}")
+    params = {'uri': at_uri, 'depth': 1000 if reply_mode else 0, 'parentHeight': 1000 if reply_mode else 0}
+    response = requests.get('https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread', headers={'Content-Type': 'application/json'}, params=params)
+    if response.status_code != 200: raise Exception(f"Failed to retrieve post thread: '{response.text}'")
+    return response.json(), rkey
 
 def check_ffmpeg():
-    try:
+    try: 
         result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if result.returncode != 0:
-            print("ffmpeg is not installed.")
-            sys.exit(1)
-    except FileNotFoundError:
-        print("ffmpeg is not installed.")
-        sys.exit(1)
+        if result.returncode != 0: print("ffmpeg is not installed.") or sys.exit(1)
+    except FileNotFoundError: print("ffmpeg is not installed.") or sys.exit(1)
 
-def download_video(post_data, path):
-    playlist_url = post_data.get('thread', {}).get('post', {}).get('embed', {}).get('playlist', '')
-    if not playlist_url:
-        print(f"Post does not have a video embed.")
-        sys.exit(1)
+def download_video(post_data, path, m3u8_mode):
+    if not post_data.get('thread', {}).get('post', {}).get('record', {}).get('embed', {}).get('video', ''): print("This post has no video.") or sys.exit(1)
     check_ffmpeg()
-    result = subprocess.run(
-        ['ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path])
-    if result.returncode == 0:
-        print(f"Video successfully downloaded to {path}")
+    if m3u8_mode:
+        playlist_url = post_data.get('thread', {}).get('post', {}).get('embed', {}).get('playlist', '')
+        if not playlist_url: print(f"Post does not have a video embed.") or sys.exit(1)
+        response = subprocess.run(['ffmpeg', '-i', playlist_url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', path])
+    else:
+        did = post_data.get('thread', {}).get('post', {}).get('author', {}).get('did', {})
+        blob_cid = post_data.get('thread', {}).get('post', {}).get('record', {}).get('embed', {}).get('video', {}).get('ref', {}).get('$link', "")
+        response = requests.get(f"https://bsky.social/xrpc/com.atproto.sync.getBlob?did={did}&cid={blob_cid}")
+    if response.returncode == 0: print(f"Video successfully downloaded to {path}")
 
 def main():
-    try:
-        post_url, directory, json_print_mode, input_filename = input_validation()
-        post_data, rkey = get_post_thread(post_url)
-        if json_print_mode:
-            print(post_data)
-            sys.exit(1)
-        if input_filename != "":
-            path = f"{directory}/{input_filename}.mp4"
-        else:
-            path = f"{directory}/{rkey}.mp4"
-        download_video(post_data, path)
-    except Exception as e:
-        print(e)
+    post_url, directory, filename, json_mode, m3u8_mode, reply_mode = input_validation("")
+    post_data, rkey = get_post_thread(post_url, reply_mode)
+    ext = "json" if json_mode else "mp4"
+    path = f"{directory}/{rkey}.{ext}" if filename == "" else f"{directory}/{filename}.{ext}"
+    if json_mode: (json.dump(post_data, open(path, 'w'), indent=4) or print(f"JSON extracted to '{path}'") or sys.exit())
+    download_video(post_data, path, m3u8_mode)
 
 if __name__ == "__main__":
     main()
