@@ -6,8 +6,7 @@ import sys
 import json
 from pathlib import Path
 
-defaults = {
-    #input_dir >> default_dir >> cwd
+config = {
     "default_dir": ''
 }
 
@@ -37,7 +36,7 @@ def input_validation(filename):
     json_mode = 0 if "--json" not in sys.argv else (sys.argv.remove("--json") or 1)
     reply_mode = 0 if "--replies" not in sys.argv else (sys.argv.remove("--replies") or 1)
     url = sys.argv[1] if len(sys.argv) >= 2 else (print("No url entered.") or sys.exit(1))
-    directory = sys.argv[2] if len(sys.argv) >= 3 else (Path.cwd() if defaults["default_dir"] == '' else defaults["default_dir"])
+    directory = sys.argv[2] if len(sys.argv) >= 3 else (Path.cwd() if config["default_dir"] == '' else config["default_dir"])
     if not Path(directory).is_dir():
         if Path(directory).parent.is_dir(): print(f"{directory} is not a valid directory") or sys.exit(1)
         directory = str(input_path.parent)
